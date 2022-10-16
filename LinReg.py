@@ -53,6 +53,6 @@ class LinReg:
 
         return self.theta[1], self.theta[0]
 
-    def save(self, filename: str = 'model.conf') -> None:
+    def save(self, filename: str = 'weight.csv') -> None:
         with open(filename, 'w') as f:
             f.write(','.join(map(str, self.theta)))
