@@ -1,58 +1,101 @@
-import numpy as np
 import matplotlib.pyplot as plt
-from os import path
+from typing import Any
+import pandas as pd
 
 
 class LinReg:
-    def __init__(self, learning_rate: float = 0.001, eps: float = 1e-6, theta=None) -> None:
-        self.lr = learning_rate
-        self.eps = eps
-        self.theta = [.0, .0] if theta is None else theta
 
-    def estimate(self, mileage: int, model: str = '') -> int:
-        if path.isfile(model):
-            with open(model, 'r') as f:
-                self.theta = list(map(float, f.readline().split(',')))
-        return int(self.theta[0] + self.theta[1] * mileage)
+    def __init__(self, csv_data: str) -> None:
 
-    def predict(self, x: np.array) -> np.array:
-        y_pred = np.array([self.estimate(i) for i in x])
-        return y_pred
+        file = pd.read_csv(csv_data)
+        data = file.values.reshape(-1, 2)
+        self.headers = file.columns
+        self.x, self.y = data[:, 0], data[:, 1]
+        try:
+            with open('weight.csv', 'r') as f:
+                raw = f.read()
+            data = raw.split(',')
+            self.theta0 = float(data[0])
+            self.theta1 = float(data[1])
+        except IOError:
+            self.theta0, self.theta1 = 0, 0
+        self.cost_history = []
+        self.r2_score = None
 
-    def update_theta(self, x: np.array, y: np.array) -> None:
-        y_pred = self.predict(x)
-        m = len(y)
-        self.theta[0] -= (self.lr * ((1 / m) * sum(y_pred - y)))
-        self.theta[1] -= (self.lr * ((1 / m) * sum((y_pred - y) * x)))
+    def fit(self, epoch: int = 100000, lr: float = 0.1, eps: float = 1e-3) -> tuple:
+        self.cost_history = []
+        self.theta0, self.theta1 = 0, 0
 
-    @staticmethod
-    def mean_squared_error(y_pred: np.array, target: np.array) -> float:
-        return np.average((target - y_pred) ** 2)
-
-    def fit(self, data: np.array, target: np.array, iterations: int = 1000) -> tuple:
-
-        self.theta[0] = 0.01
-        self.theta[1] = 0.01
-
-        previous_mse = None
-        mse = []
-        weights = []
-
-        for i in range(iterations):
-            y_pred = self.predict(data)
-            current_mse = self.mean_squared_error(y_pred, target)
-            if previous_mse and abs(previous_mse - current_mse) <= self.eps:
+        for i in range(epoch):
+            self.__update_thetas(lr)
+            current_cost = self.cost()
+            if self.cost_history and abs(current_cost - self.cost_history[-1]) < eps:
                 break
-            previous_mse = current_mse
-            mse.append(current_mse)
-            weights.append(self.theta[1])
+            self.cost_history.append(current_cost)
+            print(f"Iteration {i + 1}: MSE {current_cost}, theta0 {self.theta0}, theta1 {self.theta1}")
+        self.__r2_score()
+        return self.theta0, self.theta1
 
-            self.update_theta(data, target)
+    def __r2_score(self) -> None:
+        normalized_x = self.__normalize(self.x)
+        u = sum([(self.__estimate(x) - y) ** 2 for x, y in zip(normalized_x, self.y)])
+        v = sum([(y - self.y.mean()) ** 2 for y in self.y])
+        self.r2_score = 1 - u/v
 
-            print(f"Epoch [{i + 1}]:\tMSE {current_mse:.5}\t theta_1 {self.theta[1]:.4}\ttheta_0 {self.theta[0]:.4}")
+    def predict(self, x: int):
+        val = self.__normalize(x)
+        return self.__estimate(val)
 
-        return self.theta[1], self.theta[0]
+    def __estimate(self, x: Any) -> Any:
+        return self.theta0 + self.theta1 * x
 
-    def save(self, filename: str = 'weight.csv') -> None:
-        with open(filename, 'w') as f:
-            f.write(','.join(map(str, self.theta)))
+    def cost(self) -> float:
+        normalized_x = self.__normalize(self.x)
+        return sum([(self.__estimate(x) - y) ** 2 for x, y in zip(normalized_x, self.y)]) / len(self.x)
+
+    def plot(self) -> object:
+        line_x = [self.x.min(), self.x.max()]
+        line_y = [self.__estimate(x) for x in [0, 1]]
+        plt.figure(figsize=(9, 7))
+        plt.scatter(self.x, self.y, color='green', alpha=.5, label="data")
+        plt.plot(line_x, line_y, color='red', alpha=.7, label="model")
+        plt.xlabel(self.headers[0])
+        plt.ylabel(self.headers[1])
+        plt.title(self.__module__)
+        plt.legend()
+        plt.grid()
+        return plt
+
+    def plot_cost(self) -> plt.plot:
+        x = range(len(self.cost_history))
+        y = self.cost_history
+        plt.figure(figsize=(9, 7))
+        plt.plot(x, y, label="cost")
+        plt.xlabel('Epoch')
+        plt.ylabel('MSE')
+        plt.title('Cost Function')
+        plt.legend()
+        return plt
+
+    def score(self) -> float:
+        return self.r2_score
+
+    def save(self) -> None:
+        with open('weight.csv', "w") as f:
+            f.write(f'{self.theta0},{self.theta1}')
+
+    def __normalize(self, x: Any) -> Any:
+        return (x - self.x.min()) / (self.x.max() - self.x.min())
+
+    def __update_thetas(self, lr: float) -> None:
+        normalized_x = self.__normalize(self.x)
+        theta0_tmp_list = []
+        theta1_tmp_list = []
+
+        for x, y in zip(normalized_x, self.y):
+            theta0_tmp_list.append(self.__estimate(x) - y)
+            theta1_tmp_list.append((self.__estimate(x) - y) * x)
+
+        x_size = len(normalized_x)
+        self.theta0 = self.theta0 - lr * (sum(theta0_tmp_list) / x_size)
+        self.theta1 = self.theta1 - lr * (sum(theta1_tmp_list) / x_size)
